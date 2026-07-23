@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import Layout from "./components/Layout";
+import MedicineMaster from "./pages/MedicineMaster";
 
 import Dashboard from "./pages/Dashboard";
 import RegisterPatient from "./pages/RegisterPatient";
@@ -11,6 +12,7 @@ import PatientHistory from "./pages/PatientHistory";
 import Prescription from "./pages/Prescription";
 
 function App() {
+  
   return (
     <BrowserRouter>
       <Layout>
@@ -30,6 +32,10 @@ function App() {
             path="/register"
             element={<RegisterPatient />}
           />
+          <Route
+  path="/medicines"
+  element={<MedicineMaster />}
+/>
 
           <Route
             path="/search"

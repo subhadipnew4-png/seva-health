@@ -24,14 +24,23 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import {
   findPatient,
   addConsultation,
-} from "../services/storage";
+} from "../services/patientService";
 
 export default function Consultation() {
 
   const navigate = useNavigate();
   const { mobile } = useParams();
 
-  const patient = findPatient(mobile);
+  const [patient, setPatient] = useState(null);
+
+React.useEffect(() => {
+  async function loadPatient() {
+    const data = await findPatient(mobile);
+    setPatient(data);
+  }
+
+  loadPatient();
+}, [mobile]);
 
   const [bp, setBp] = useState("");
   const [weight, setWeight] = useState("");
@@ -134,18 +143,45 @@ export default function Consultation() {
 
   }
 
-  function saveConsultation() {
+  async function saveConsultation() {
 
-    addConsultation(
+  try {
+
+    await addConsultation({
+
       mobile,
-      buildConsultation()
-    );
+
+      bp,
+
+      weight,
+
+      sugar,
+
+      complaint,
+
+      diagnosis,
+
+      advice,
+
+      doctor,
+
+      medicines,
+
+    });
 
     alert("Consultation Saved Successfully");
 
     navigate("/history/" + mobile);
 
+  } catch (err) {
+
+    console.error(err);
+
+    alert("Error saving consultation");
+
   }
+
+}
 
   function printPrescription() {
 
@@ -179,7 +215,7 @@ export default function Consultation() {
             <TextField
               fullWidth
               label="Patient ID"
-              value={patient.patientId}
+              value={patient.patient_code || patient.id}
               InputProps={{ readOnly: true }}
             />
           </Grid>
@@ -188,7 +224,7 @@ export default function Consultation() {
             <TextField
               fullWidth
               label="Patient Name"
-              value={patient.name}
+              value={patient.full_name}
               InputProps={{ readOnly: true }}
             />
           </Grid>

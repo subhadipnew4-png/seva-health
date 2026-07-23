@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Container,
@@ -5,16 +6,40 @@ import {
   Typography,
   Button,
   Divider,
+  CircularProgress,
 } from "@mui/material";
 
 import { findPatient } from "../services/storage";
 
 export default function PatientProfile() {
-
   const { mobile } = useParams();
   const navigate = useNavigate();
 
-  const patient = findPatient(mobile);
+  const [patient, setPatient] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadPatient();
+  }, [mobile]);
+
+  async function loadPatient() {
+    try {
+      const data = await findPatient(mobile);
+      setPatient(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <Container sx={{ mt: 5, textAlign: "center" }}>
+        <CircularProgress />
+      </Container>
+    );
+  }
 
   if (!patient) {
     return (
@@ -28,7 +53,6 @@ export default function PatientProfile() {
 
   return (
     <Container maxWidth="md" sx={{ mt: 5 }}>
-
       <Paper sx={{ p: 4 }} elevation={4}>
 
         <Typography
@@ -42,11 +66,11 @@ export default function PatientProfile() {
         <Divider sx={{ mb: 3 }} />
 
         <Typography>
-          <b>Patient ID:</b> {patient.patientId}
+          <b>Patient ID:</b> {patient.id}
         </Typography>
 
         <Typography>
-          <b>Name:</b> {patient.name}
+          <b>Name:</b> {patient.full_name}
         </Typography>
 
         <Typography>
@@ -66,7 +90,7 @@ export default function PatientProfile() {
         </Typography>
 
         <Typography>
-          <b>Blood Group:</b> {patient.bloodGroup}
+          <b>Blood Group:</b> {patient.bloodgroup}
         </Typography>
 
         <Typography>
@@ -96,7 +120,6 @@ export default function PatientProfile() {
         </Button>
 
       </Paper>
-
     </Container>
   );
 }
