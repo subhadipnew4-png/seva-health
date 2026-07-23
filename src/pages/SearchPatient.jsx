@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Container,
@@ -14,13 +14,26 @@ import { getPatients } from "../services/storage";
 
 export default function SearchPatient() {
   const navigate = useNavigate();
-  const [keyword, setKeyword] = useState("");
 
-  const patients = getPatients();
+  const [keyword, setKeyword] = useState("");
+  const [patients, setPatients] = useState([]);
+
+  useEffect(() => {
+    loadPatients();
+  }, []);
+
+  async function loadPatients() {
+    try {
+      const data = await getPatients();
+      setPatients(data || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   const filteredPatients = patients.filter((patient) => {
-    const name = patient.name ? patient.name.toLowerCase() : "";
-    const mobile = patient.mobile ? patient.mobile : "";
+    const name = (patient.full_name || "").toLowerCase();
+    const mobile = patient.mobile || "";
 
     return (
       name.includes(keyword.toLowerCase()) ||
@@ -45,15 +58,11 @@ export default function SearchPatient() {
         />
 
         {filteredPatients.map((patient) => (
-          <Card key={patient.patientId} sx={{ mb: 2 }}>
+          <Card key={patient.id} sx={{ mb: 2 }}>
             <CardContent>
 
               <Typography variant="h6">
-                {patient.name}
-              </Typography>
-
-              <Typography>
-                <b>Patient ID:</b> {patient.patientId}
+                {patient.full_name}
               </Typography>
 
               <Typography>

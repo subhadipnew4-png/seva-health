@@ -10,7 +10,10 @@ import {
   Alert,
 } from "@mui/material";
 
-import { addPatient, getPatients } from "../services/storage";
+import {
+  addPatient,
+  getPatients,
+} from "../services/patientService";
 
 export default function RegisterPatient() {
   const emptyPatient = {
@@ -39,7 +42,7 @@ export default function RegisterPatient() {
     });
   };
 
-  const savePatient = () => {
+  const savePatient = async () => {
     if (
       !patient.name ||
       !patient.mobile ||
@@ -49,24 +52,47 @@ export default function RegisterPatient() {
       setMessage("Please fill all mandatory fields.");
       return;
     }
+      try {
 
-    const patients = getPatients();
+    const patients = await getPatients();
 
     const duplicate = patients.find(
       (p) => p.mobile === patient.mobile
     );
 
     if (duplicate) {
-      setMessage("Patient already exists with this mobile number.");
+      setMessage(
+        "Patient already exists with this mobile number."
+      );
       return;
     }
 
-    addPatient(patient);
+    await addPatient({
+  full_name: patient.name,
+  age: Number(patient.age),
+  gender: patient.gender,
+  mobile: patient.mobile,
+  village: patient.village,
+  height: patient.height ? Number(patient.height) : null,
+  weight: patient.weight ? Number(patient.weight) : null,
+  bp: patient.bp,
+  sugar: patient.sugar,
+  bloodgroup: patient.bloodGroup,
+  allergies: patient.allergies,
+  complaint: patient.complaint,
+  doctor: patient.doctor,
+});
 
     setMessage("Patient Registered Successfully.");
 
     setPatient(emptyPatient);
-  };
+
+  } catch (err) {
+  console.error("Supabase Error:", err);
+  alert(JSON.stringify(err, null, 2));
+  setMessage("Error saving patient.");
+}
+};
 
   return (
     <Container maxWidth="md" sx={{ mt: 5, mb: 5 }}>

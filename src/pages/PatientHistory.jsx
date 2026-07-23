@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -16,14 +16,52 @@ import {
 import {
   findPatient,
   getConsultations,
-} from "../services/storage";
+} from "../services/patientService";
 
 export default function PatientHistory() {
 
   const { mobile } = useParams();
   const navigate = useNavigate();
 
-  const patient = findPatient(mobile);
+  const [patient, setPatient] = useState(null);
+  const [consultations, setConsultations] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+
+    async function loadData() {
+
+      try {
+
+        const patientData = await findPatient(mobile);
+        setPatient(patientData);
+
+        const history = await getConsultations(mobile);
+        setConsultations(history || []);
+
+      } catch (err) {
+
+        console.error(err);
+
+      } finally {
+
+        setLoading(false);
+
+      }
+
+    }
+
+    loadData();
+
+  }, [mobile]);
+
+  if (loading) {
+    return (
+      <Container sx={{ mt: 4 }}>
+        <Typography>Loading...</Typography>
+      </Container>
+    );
+  }
 
   if (!patient) {
     return (
@@ -43,36 +81,24 @@ export default function PatientHistory() {
     );
   }
 
-  const consultations = getConsultations(mobile);
-
   return (
 
-    <Container
-      maxWidth="md"
-      sx={{ my: 4 }}
-    >
+    <Container maxWidth="md" sx={{ my: 4 }}>
 
-      <Paper
-        elevation={3}
-        sx={{ p: 4 }}
-      >
+      <Paper elevation={3} sx={{ p: 4 }}>
 
-        <Typography
-          variant="h5"
-          fontWeight="bold"
-          gutterBottom
-        >
+        <Typography variant="h5" fontWeight="bold" gutterBottom>
           Patient Medical History
         </Typography>
 
         <Divider sx={{ mb: 3 }} />
 
         <Typography>
-          <strong>Patient ID:</strong> {patient.patientId}
+          <strong>Patient ID:</strong> {patient.patient_code || patient.id}
         </Typography>
 
         <Typography>
-          <strong>Name:</strong> {patient.name}
+          <strong>Name:</strong> {patient.full_name}
         </Typography>
 
         <Typography>
@@ -93,30 +119,23 @@ export default function PatientHistory() {
 
         <Divider sx={{ my: 3 }} />
 
-        <Typography
-          variant="h6"
-          gutterBottom
-        >
+        <Typography variant="h6" gutterBottom>
           Consultation History
         </Typography>
 
         <Stack spacing={2}>
-{consultations.length === 0 ? (
 
-          <Typography color="text.secondary">
-            No consultation history found.
-          </Typography>
+          {consultations.length === 0 ? (
 
-        ) : (
+            <Typography color="text.secondary">
+              No consultation history found.
+            </Typography>
 
-          [...consultations]
-            .reverse()
-            .map((consultation, index) => (
+          ) : (
 
-              <Card
-                key={index}
-                variant="outlined"
-              >
+            consultations.map((consultation, index) => (
+
+              <Card key={consultation.id} variant="outlined">
 
                 <CardContent>
 
@@ -125,7 +144,8 @@ export default function PatientHistory() {
                   </Typography>
 
                   <Typography>
-                    <strong>Date:</strong> {consultation.date}
+                    <strong>Date:</strong>{" "}
+                    {new Date(consultation.created_at).toLocaleDateString()}
                   </Typography>
 
                   <Typography>
@@ -141,27 +161,25 @@ export default function PatientHistory() {
                   </Typography>
 
                   <Typography>
-                    <strong>Chief Complaint:</strong>{" "}
-                    {consultation.complaint}
+                    <strong>Chief Complaint:</strong> {consultation.complaint}
                   </Typography>
 
                   <Typography>
-                    <strong>Diagnosis:</strong>{" "}
-                    {consultation.diagnosis}
+                    <strong>Diagnosis:</strong> {consultation.diagnosis}
                   </Typography>
 
                   <Typography>
-                    <strong>Doctor:</strong>{" "}
-                    {consultation.doctor}
+                    <strong>Doctor:</strong> {consultation.doctor}
                   </Typography>
 
-                  <Box
-                    sx={{
-                      mt: 2,
-                      display: "flex",
-                      gap: 2,
-                    }}
-                  >
+                  <Typography>
+                    <strong>Medicines:</strong>{" "}
+                    {consultation.medicines
+                      ?.map((m) => m.medicine)
+                      .join(", ")}
+                  </Typography>
+
+                  <Box sx={{ mt: 2 }}>
 
                     <Button
                       variant="contained"
@@ -180,8 +198,9 @@ export default function PatientHistory() {
 
             ))
 
-        )}
-</Stack>
+          )}
+
+        </Stack>
 
         <Divider sx={{ my: 4 }} />
 
