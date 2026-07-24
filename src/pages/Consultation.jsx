@@ -27,6 +27,8 @@ import {
   addConsultation,
   getMedicines,
   updateMedicine,
+  savePrescriptionMedicines,
+  deletePrescriptionMedicines,
 } from "../services/patientService";
 
 export default function Consultation() {
@@ -171,12 +173,17 @@ export default function Consultation() {
   async function saveConsultation() {
     try {
       const latestMedicines = await getMedicines();
+      const validMedicines = medicines.filter((medicine) => medicine.medicineId);
 
-      for (const medicine of medicines) {
-        if (!medicine.medicineId) {
-          continue;
-        }
+      if (validMedicines.length === 0) {
+        alert("Please select at least one medicine from the medicine master.");
+        return;
+      }
 
+      const prescriptionRows = [];
+      const updatedMedicines = [];
+
+      for (const medicine of validMedicines) {
         const medicineRecord = latestMedicines.find(
           (item) => item.id === medicine.medicineId
         );
@@ -204,9 +211,27 @@ export default function Consultation() {
           alert(`Insufficient stock for ${medicineName}`);
           return;
         }
+
+        prescriptionRows.push({
+          medicineId: medicine.medicineId,
+          medicineName,
+          quantity: quantityToDeduct,
+          dosage: medicine.dose,
+          duration: medicine.days,
+          instructions: medicine.remarks,
+        });
+
+        updatedMedicines.push({
+          id: medicine.medicineId,
+          currentStock,
+          quantityToDeduct,
+          medicineName,
+          reorderLevel: Number(medicineRecord?.reorder_level ?? 0),
+          dosageForm: medicineRecord?.dosage_form,
+        });
       }
 
-      await addConsultation({
+      const consultationPayload = {
         mobile,
         bp,
         weight,
@@ -215,63 +240,59 @@ export default function Consultation() {
         diagnosis,
         advice,
         doctor,
-        medicines,
-      });
+        medicines: validMedicines,
+      };
 
+      const consultationResult = await addConsultation(consultationPayload);
+      const consultationId = consultationResult?.[0]?.id || consultationResult?.id;
+
+      if (!consultationId) {
+        throw new Error("Consultation save failed");
+      }
+
+      await savePrescriptionMedicines(consultationId, prescriptionRows);
+
+      const stockUpdates = [];
       let lowStockAlert = false;
 
-      for (const medicine of medicines) {
-        if (!medicine.medicineId) {
-          continue;
-        }
-
-        const medicineRecord = latestMedicines.find(
-          (item) => item.id === medicine.medicineId
-        );
-
-        const currentStock = Number(
-          medicineRecord?.current_stock ?? medicine.stock ?? 0
-        );
-
-        const days = Number(medicine.days || 0);
-        const tabletsPerDay = parseDose(medicine.dose);
-
-        const quantityToDeduct = isLiquidMedicine(medicineRecord?.dosage_form)
-          ? 1
-          : tabletsPerDay * days;
-
-        const newStock = currentStock - quantityToDeduct;
-
-        await updateMedicine(medicine.medicineId, {
+      for (const entry of updatedMedicines) {
+        const newStock = entry.currentStock - entry.quantityToDeduct;
+        const updateValues = {
           current_stock: newStock,
-        });
+          active: newStock > 0,
+        };
 
-        const recordIndex = latestMedicines.findIndex(
-          (item) => item.id === medicine.medicineId
-        );
+        await updateMedicine(entry.id, updateValues);
+        stockUpdates.push({ id: entry.id, newStock, medicineName: entry.medicineName });
 
+        const recordIndex = latestMedicines.findIndex((item) => item.id === entry.id);
         if (recordIndex >= 0) {
           latestMedicines[recordIndex].current_stock = newStock;
+          latestMedicines[recordIndex].active = newStock > 0;
         }
 
         setMedicineMaster((prev) =>
           prev.map((item) =>
-            item.id === medicine.medicineId
-              ? { ...item, current_stock: newStock }
+            item.id === entry.id
+              ? { ...item, current_stock: newStock, active: newStock > 0 }
               : item
           )
         );
 
-        if (newStock <= Number(medicineRecord?.reorder_level ?? 0)) {
+        if (newStock <= Number(entry.reorderLevel ?? 0)) {
           lowStockAlert = true;
         }
       }
 
+      const stockSummary = stockUpdates
+        .map((item) => `${item.medicineName}: ${item.newStock}`)
+        .join(" | ");
+
       if (lowStockAlert) {
-        alert("Low Stock Alert");
+        alert(`Low Stock Alert\n${stockSummary}`);
       }
 
-      alert("Consultation Saved Successfully");
+      alert(`Consultation Saved Successfully\nUpdated Stock: ${stockSummary}`);
 
       navigate("/history/" + mobile);
     } catch (err) {
