@@ -16,6 +16,7 @@ import {
   TableCell,
   TableBody,
   IconButton,
+  Autocomplete,
 } from "@mui/material";
 
 import AddIcon from "@mui/icons-material/Add";
@@ -24,23 +25,34 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import {
   findPatient,
   addConsultation,
+  getMedicines,
+  updateMedicine,
 } from "../services/patientService";
 
 export default function Consultation() {
-
   const navigate = useNavigate();
   const { mobile } = useParams();
 
   const [patient, setPatient] = useState(null);
+  const [medicineMaster, setMedicineMaster] = useState([]);
 
-React.useEffect(() => {
-  async function loadPatient() {
-    const data = await findPatient(mobile);
-    setPatient(data);
-  }
+  React.useEffect(() => {
+    async function loadPatient() {
+      const data = await findPatient(mobile);
+      setPatient(data);
+    }
 
-  loadPatient();
-}, [mobile]);
+    loadPatient();
+  }, [mobile]);
+
+  React.useEffect(() => {
+    async function loadMedicines() {
+      const data = await getMedicines();
+      setMedicineMaster(data.filter((m) => m.active));
+    }
+
+    loadMedicines();
+  }, []);
 
   const [bp, setBp] = useState("");
   const [weight, setWeight] = useState("");
@@ -63,25 +75,33 @@ React.useEffect(() => {
   if (!patient) {
     return (
       <Container sx={{ mt: 5 }}>
-        <Typography variant="h5">
-          Patient not found
-        </Typography>
+        <Typography variant="h5">Patient not found</Typography>
       </Container>
     );
   }
 
   function handleMedicineChange(index, field, value) {
-
     const updated = [...medicines];
 
     updated[index][field] = value;
 
     setMedicines(updated);
+  }
 
+  function handleMedicineSelection(index, selected) {
+    const updated = [...medicines];
+
+    updated[index] = {
+      ...updated[index],
+      medicine: selected ? selected.medicine_name : "",
+      medicineId: selected ? selected.id : "",
+      stock: selected ? selected.current_stock : "",
+    };
+
+    setMedicines(updated);
   }
 
   function addMedicineRow() {
-
     setMedicines([
       ...medicines,
       {
@@ -91,34 +111,25 @@ React.useEffect(() => {
         remarks: "",
       },
     ]);
-
   }
 
   function deleteMedicineRow(index) {
-
-    const updated = medicines.filter(
-      (_, i) => i !== index
-    );
+    const updated = medicines.filter((_, i) => i !== index);
 
     if (updated.length === 0) {
-
       updated.push({
         medicine: "",
         dose: "",
         days: "",
         remarks: "",
       });
-
     }
 
     setMedicines(updated);
-
   }
 
   function buildConsultation() {
-
     return {
-
       consultationId: Date.now(),
 
       date: new Date().toLocaleDateString(),
@@ -138,67 +149,146 @@ React.useEffect(() => {
       doctor,
 
       medicines,
-
     };
+  }
 
+  function parseDose(dose) {
+    if (!dose) return 0;
+
+    return String(dose)
+      .split("-")
+      .reduce((total, part) => {
+        const parsed = Number.parseInt(part, 10);
+        return total + (Number.isFinite(parsed) ? parsed : 0);
+      }, 0);
+  }
+
+  function isLiquidMedicine(dosageForm) {
+    const form = String(dosageForm || "").trim().toLowerCase();
+    return /syrup|liquid|suspension|solution|drop/i.test(form);
   }
 
   async function saveConsultation() {
+    try {
+      const latestMedicines = await getMedicines();
 
-  try {
+      for (const medicine of medicines) {
+        if (!medicine.medicineId) {
+          continue;
+        }
 
-    await addConsultation({
+        const medicineRecord = latestMedicines.find(
+          (item) => item.id === medicine.medicineId
+        );
 
-      mobile,
+        const medicineName =
+          medicine.medicine || medicineRecord?.medicine_name || "Medicine";
 
-      bp,
+        const currentStock = Number(
+          medicineRecord?.current_stock ?? medicine.stock ?? 0
+        );
 
-      weight,
+        const days = Number(medicine.days || 0);
+        const tabletsPerDay = parseDose(medicine.dose);
 
-      sugar,
+        const quantityToDeduct = isLiquidMedicine(medicineRecord?.dosage_form)
+          ? 1
+          : tabletsPerDay * days;
 
-      complaint,
+        if (quantityToDeduct <= 0) {
+          alert("Please enter a valid dose and number of days.");
+          return;
+        }
 
-      diagnosis,
+        if (quantityToDeduct > currentStock) {
+          alert(`Insufficient stock for ${medicineName}`);
+          return;
+        }
+      }
 
-      advice,
+      await addConsultation({
+        mobile,
+        bp,
+        weight,
+        sugar,
+        complaint,
+        diagnosis,
+        advice,
+        doctor,
+        medicines,
+      });
 
-      doctor,
+      let lowStockAlert = false;
 
-      medicines,
+      for (const medicine of medicines) {
+        if (!medicine.medicineId) {
+          continue;
+        }
 
-    });
+        const medicineRecord = latestMedicines.find(
+          (item) => item.id === medicine.medicineId
+        );
 
-    alert("Consultation Saved Successfully");
+        const currentStock = Number(
+          medicineRecord?.current_stock ?? medicine.stock ?? 0
+        );
 
-    navigate("/history/" + mobile);
+        const days = Number(medicine.days || 0);
+        const tabletsPerDay = parseDose(medicine.dose);
 
-  } catch (err) {
+        const quantityToDeduct = isLiquidMedicine(medicineRecord?.dosage_form)
+          ? 1
+          : tabletsPerDay * days;
 
-    console.error(err);
+        const newStock = currentStock - quantityToDeduct;
 
-    alert("Error saving consultation");
+        await updateMedicine(medicine.medicineId, {
+          current_stock: newStock,
+        });
 
+        const recordIndex = latestMedicines.findIndex(
+          (item) => item.id === medicine.medicineId
+        );
+
+        if (recordIndex >= 0) {
+          latestMedicines[recordIndex].current_stock = newStock;
+        }
+
+        setMedicineMaster((prev) =>
+          prev.map((item) =>
+            item.id === medicine.medicineId
+              ? { ...item, current_stock: newStock }
+              : item
+          )
+        );
+
+        if (newStock <= Number(medicineRecord?.reorder_level ?? 0)) {
+          lowStockAlert = true;
+        }
+      }
+
+      if (lowStockAlert) {
+        alert("Low Stock Alert");
+      }
+
+      alert("Consultation Saved Successfully");
+
+      navigate("/history/" + mobile);
+    } catch (err) {
+      console.error(err);
+      alert("Error saving consultation");
+    }
   }
 
-}
-
   function printPrescription() {
-
-    addConsultation(
-      mobile,
-      buildConsultation()
-    );
+    addConsultation(mobile, buildConsultation());
 
     navigate("/prescription/" + mobile);
-
   }
 
   return (
-<Container maxWidth="lg" sx={{ mt: 3, mb: 5 }}>
-
+    <Container maxWidth="lg" sx={{ mt: 3, mb: 5 }}>
       <Paper sx={{ p: 4 }}>
-
         <Typography variant="h4" gutterBottom>
           New Consultation
         </Typography>
@@ -210,7 +300,6 @@ React.useEffect(() => {
         </Typography>
 
         <Grid container spacing={2} sx={{ mb: 4 }}>
-
           <Grid item xs={12} md={4}>
             <TextField
               fullWidth
@@ -264,7 +353,6 @@ React.useEffect(() => {
               InputProps={{ readOnly: true }}
             />
           </Grid>
-
         </Grid>
 
         <Divider sx={{ mb: 3 }} />
@@ -274,7 +362,6 @@ React.useEffect(() => {
         </Typography>
 
         <Grid container spacing={2}>
-
           <Grid item xs={12} md={4}>
             <TextField
               fullWidth
@@ -323,7 +410,6 @@ React.useEffect(() => {
               onChange={(e) => setDiagnosis(e.target.value)}
             />
           </Grid>
-
         </Grid>
 
         <Divider sx={{ my: 4 }} />
@@ -333,12 +419,11 @@ React.useEffect(() => {
         </Typography>
 
         <Table>
-
           <TableHead>
-
             <TableRow>
-
-              <TableCell><strong>Medicine</strong></TableCell>
+              <TableCell>
+                <strong>Medicine</strong>
+              </TableCell>
 
               <TableCell width="140">
                 <strong>Dose</strong>
@@ -355,104 +440,83 @@ React.useEffect(() => {
               <TableCell width="70">
                 <strong>Delete</strong>
               </TableCell>
-
             </TableRow>
-
           </TableHead>
 
           <TableBody>
-
             {medicines.map((medicine, index) => (
-
               <TableRow key={index}>
-
                 <TableCell>
-
-                  <TextField
+                  <Autocomplete
                     fullWidth
-                    value={medicine.medicine}
-                    placeholder="Medicine Name"
-                    onChange={(e) =>
-                      handleMedicineChange(
-                        index,
-                        "medicine",
-                        e.target.value
-                      )
+                    options={medicineMaster}
+                    value={
+                      medicineMaster.find((m) => m.id === medicine.medicineId) || null
                     }
+                    onChange={(_, selected) =>
+                      handleMedicineSelection(index, selected)
+                    }
+                    getOptionLabel={(option) =>
+                      option
+                        ? `${option.medicine_name} (${option.strength} ${option.dosage_form})`
+                        : ""
+                    }
+                    isOptionEqualToValue={(option, value) =>
+                      option.id === value.id
+                    }
+                    renderInput={(params) => (
+                      <TextField {...params} placeholder="Select Medicine" />
+                    )}
                   />
-
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    Available Stock: {medicine.stock ?? 0}
+                  </Typography>
                 </TableCell>
 
                 <TableCell>
-
                   <TextField
                     fullWidth
                     value={medicine.dose}
                     placeholder="1-0-1"
                     onChange={(e) =>
-                      handleMedicineChange(
-                        index,
-                        "dose",
-                        e.target.value
-                      )
+                      handleMedicineChange(index, "dose", e.target.value)
                     }
                   />
-
                 </TableCell>
 
                 <TableCell>
-
                   <TextField
                     fullWidth
                     value={medicine.days}
                     placeholder="5"
                     onChange={(e) =>
-                      handleMedicineChange(
-                        index,
-                        "days",
-                        e.target.value
-                      )
+                      handleMedicineChange(index, "days", e.target.value)
                     }
                   />
-
                 </TableCell>
 
                 <TableCell>
-
                   <TextField
                     fullWidth
                     value={medicine.remarks}
                     placeholder="After Food"
                     onChange={(e) =>
-                      handleMedicineChange(
-                        index,
-                        "remarks",
-                        e.target.value
-                      )
+                      handleMedicineChange(index, "remarks", e.target.value)
                     }
                   />
-
                 </TableCell>
 
                 <TableCell align="center">
-
                   <IconButton
                     color="error"
-                    onClick={() =>
-                      deleteMedicineRow(index)
-                    }
+                    onClick={() => deleteMedicineRow(index)}
                   >
                     <DeleteIcon />
                   </IconButton>
-
                 </TableCell>
-
               </TableRow>
-
             ))}
-
           </TableBody>
-
         </Table>
 
         <Button
@@ -465,7 +529,8 @@ React.useEffect(() => {
         </Button>
 
         <Divider sx={{ my: 4 }} />
-<Typography variant="h6" gutterBottom>
+
+        <Typography variant="h6" gutterBottom>
           Advice
         </Typography>
 
@@ -484,7 +549,6 @@ React.useEffect(() => {
         </Typography>
 
         <Grid container spacing={2} sx={{ mb: 4 }}>
-
           <Grid item xs={12} md={6}>
             <TextField
               fullWidth
@@ -504,7 +568,6 @@ React.useEffect(() => {
               }}
             />
           </Grid>
-
         </Grid>
 
         <Divider sx={{ mb: 3 }} />
@@ -517,39 +580,23 @@ React.useEffect(() => {
           spacing={2}
           justifyContent="center"
         >
-
-          <Button
-            variant="contained"
-            size="large"
-            onClick={saveConsultation}
-          >
+          <Button variant="contained" size="large" onClick={saveConsultation}>
             Save Consultation
           </Button>
 
-          <Button
-            variant="outlined"
-            size="large"
-            onClick={printPrescription}
-          >
+          <Button variant="outlined" size="large" onClick={printPrescription}>
             Print Prescription
           </Button>
 
           <Button
             variant="text"
             size="large"
-            onClick={() =>
-              navigate("/history/" + mobile)
-            }
+            onClick={() => navigate("/history/" + mobile)}
           >
             Back
           </Button>
-
         </Stack>
-
       </Paper>
-
     </Container>
-
   );
-
 }
