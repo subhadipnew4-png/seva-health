@@ -1,34 +1,55 @@
 import { supabase } from "./supabase";
 
+function isMissingTableError(error) {
+  return (
+    error?.code === "PGRST205" ||
+    error?.code === "42P01" ||
+    error?.message?.includes("Could not find the table") ||
+    error?.message?.includes("does not exist")
+  );
+}
+
 /* ===========================
    PATIENTS
 =========================== */
 
 export async function addPatient(patient) {
-  // NOTE:
-  // This will be improved later with a proper sequence.
-  // Keeping it as-is for now.
-
-  const { data: latest } = await supabase
+  const { data: patients, error: patientsError } = await supabase
     .from("patients")
-    .select("id")
-    .order("id", { ascending: false })
-    .limit(1);
+    .select("patient_code");
 
-  let nextNumber = 1;
+  if (patientsError) throw patientsError;
 
-  if (latest && latest.length > 0) {
-    nextNumber = Number(latest[0].id) + 1;
+  let highestNumber = 0;
+
+  for (const entry of patients || []) {
+    const code = entry?.patient_code;
+
+    if (typeof code !== "string") {
+      continue;
+    }
+
+    const match = code.match(/^SH(\d{1,})$/i);
+
+    if (!match) {
+      continue;
+    }
+
+    const numericValue = Number(match[1]);
+
+    if (Number.isFinite(numericValue) && numericValue > highestNumber) {
+      highestNumber = numericValue;
+    }
   }
 
-  const patientCode =
-    "SH" + String(nextNumber).padStart(6, "0");
+  const patientCode = `SH${String(highestNumber + 1).padStart(4, "0")}`;
+  const { patient_code: _ignoredPatientCode, ...patientRecord } = patient;
 
   const { data, error } = await supabase
     .from("patients")
     .insert([
       {
-        ...patient,
+        ...patientRecord,
         patient_code: patientCode,
       },
     ])
@@ -115,6 +136,17 @@ export async function getConsultations(mobile) {
   return data || [];
 }
 
+export async function getAllConsultations() {
+  const { data, error } = await supabase
+    .from("consultations")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) return [];
+
+  return data || [];
+}
+
 export async function deleteConsultation(id) {
   const { error } = await supabase
     .from("consultations")
@@ -122,6 +154,81 @@ export async function deleteConsultation(id) {
     .eq("id", id);
 
   if (error) throw error;
+}
+
+export async function savePrescriptionMedicines(consultationId, prescriptionRows) {
+  const rows = (prescriptionRows || []).map((row) => ({
+    consultation_id: consultationId,
+    medicine_id: row.medicineId,
+    medicine_name: row.medicineName,
+    quantity: row.quantity,
+    dosage: row.dosage,
+    duration: row.duration,
+    instructions: row.instructions,
+  }));
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("prescription_medicines")
+      .insert(rows)
+      .select();
+
+    if (error) throw error;
+
+    return data || [];
+  } catch (error) {
+    if (!isMissingTableError(error)) {
+      throw error;
+    }
+
+    try {
+      const { data, error: fallbackError } = await supabase
+        .from("prescription_items")
+        .insert(rows)
+        .select();
+
+      if (fallbackError) {
+        throw fallbackError;
+      }
+
+      return data || [];
+    } catch (fallbackError) {
+      console.warn("Unable to persist prescription lines", fallbackError);
+      return [];
+    }
+  }
+}
+
+export async function deletePrescriptionMedicines(consultationId) {
+  if (!consultationId) {
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from("prescription_medicines")
+      .delete()
+      .eq("consultation_id", consultationId);
+
+    if (error) throw error;
+  } catch (error) {
+    if (!isMissingTableError(error)) {
+      throw error;
+    }
+
+    try {
+      await supabase
+        .from("prescription_items")
+        .delete()
+        .eq("consultation_id", consultationId);
+    } catch (fallbackError) {
+      console.warn("Unable to delete prescription lines", fallbackError);
+    }
+  }
 }
 
 /* ===========================
